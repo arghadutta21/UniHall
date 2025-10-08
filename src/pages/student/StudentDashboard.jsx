@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext.jsx'
 import * as api from '../../lib/mockApi.js'
@@ -11,9 +11,36 @@ export default function StudentDashboard() {
   const apps = api.listApplications({ userId: user.id })
   const notifications = hallId ? api.listNotifications({ hallId }) : api.listNotifications()
   const hasApprovedPaid = apps.some(a => a.status === 'Approved' && a.paymentDone)
-  const myRenewals = api.listRenewals().filter(r => r.userId === user.id)
-  const renewalRequested = myRenewals.some(r => r.status === 'Requested' || r.status === 'Approved')
-  const requestRenewal = () => { api.requestRenewal(user.id); window.location.reload() }
+  const myRenewals = useMemo(() => api.listRenewals({ userId: user.id }), [user.id])
+  const hasActiveRenewal = myRenewals.some(r => r.status === 'Pending' || r.status === 'Approved')
+  const [showRenewalForm, setShowRenewalForm] = useState(false)
+  const [renewalReason, setRenewalReason] = useState('')
+  const [proofDocuments, setProofDocuments] = useState([])
+
+  const handleProofChange = (e) => {
+    const files = Array.from(e.target.files || [])
+    setProofDocuments(files.map(file => file.name))
+  }
+
+  const submitRenewal = (e) => {
+    e.preventDefault()
+    if (!renewalReason.trim()) {
+      alert('Please provide a reason for your renewal request.')
+      return
+    }
+
+    try {
+      api.requestRenewal({
+        userId: user.id,
+        reason: renewalReason,
+        proofDocuments
+      })
+      alert('Renewal request submitted. You will be notified after review.')
+      window.location.reload()
+    } catch (err) {
+      alert(err.message)
+    }
+  }
   return (
     <div className="grid gap-6">
       {hall && (
@@ -59,15 +86,109 @@ export default function StudentDashboard() {
           )}
         </div>
       </div>
-      <div className="bg-white border rounded p-4">
-        <h3 className="font-medium mb-2">Renewal</h3>
-        {renewalRequested ? (
-          <p className="text-sm text-gray-600">Renewal requested. Please wait for admin review.</p>
-        ) : hasApprovedPaid ? (
-          <button className="px-3 py-2 bg-brand-600 text-white rounded text-sm" onClick={requestRenewal}>Request Renewal</button>
-        ) : (
-          <p className="text-sm text-gray-600">Renewal available after you are approved and payment is confirmed.</p>
+      <div className="bg-white border rounded p-4 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-medium">Renewal</h3>
+            <p className="text-sm text-gray-600">Request continued accommodation for the upcoming term.</p>
+          </div>
+          {hasApprovedPaid && !hasActiveRenewal && !showRenewalForm && (
+            <button
+              onClick={() => setShowRenewalForm(true)}
+              className="px-3 py-2 bg-brand-600 text-white rounded text-sm"
+            >
+              Apply for Renewal
+            </button>
+          )}
+        </div>
+
+        {!hasApprovedPaid && (
+          <p className="text-sm text-gray-600">Renewal is available after your admission is approved and payment is confirmed.</p>
         )}
+
+        {hasApprovedPaid && hasActiveRenewal && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Your renewal request is currently under review. You will be notified once a decision is made.
+          </div>
+        )}
+
+        {hasApprovedPaid && !hasActiveRenewal && showRenewalForm && (
+          <form onSubmit={submitRenewal} className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Renewal *</label>
+              <textarea
+                value={renewalReason}
+                onChange={e => setRenewalReason(e.target.value)}
+                rows={4}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
+                placeholder="Explain why you need to stay in the hall for another term."
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Supporting Documents</label>
+              <input
+                type="file"
+                multiple
+                onChange={handleProofChange}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
+              />
+              {proofDocuments.length > 0 && (
+                <p className="mt-1 text-xs text-gray-500">Attached: {proofDocuments.join(', ')}</p>
+              )}
+              <p className="mt-1 text-xs text-gray-500">Add any letters or evidence supporting your request (PDF/JPG).</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRenewalForm(false)
+                  setRenewalReason('')
+                  setProofDocuments([])
+                }}
+                className="px-3 py-2 text-sm rounded border border-gray-300 text-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-3 py-2 bg-brand-600 text-white rounded text-sm"
+              >
+                Submit Request
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-gray-700">Renewal History</h4>
+          {myRenewals.length === 0 ? (
+            <p className="text-sm text-gray-500">No renewal requests submitted yet.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {myRenewals
+                .slice()
+                .sort((a, b) => (b.requestedAt || 0) - (a.requestedAt || 0))
+                .map(r => (
+                  <li key={r.id} className="rounded border border-gray-200 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">{new Date(r.requestedAt).toLocaleString()}</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${r.status === 'Approved' ? 'bg-green-100 text-green-700' : r.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-800'}`}>
+                        {r.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-gray-700">{r.reason}</p>
+                    {Array.isArray(r.proofDocuments) && r.proofDocuments.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500">Documents: {r.proofDocuments.join(', ')}</p>
+                    )}
+                    {r.reviewNotes && (
+                      <p className="mt-2 text-xs text-gray-500">Admin note: {r.reviewNotes}</p>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
       </div>
       <div className="bg-white border rounded p-4">
         <h3 className="font-medium mb-2">Notifications</h3>

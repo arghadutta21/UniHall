@@ -1,26 +1,112 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 import * as api from '../../lib/mockApi.js'
+import FormBuilder from '../../components/FormBuilder.jsx'
+
+const makeFieldId = () => `fld-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`
+
+const normalizeFieldType = (type) => {
+  switch (type) {
+    case 'text':
+    case 'number':
+    case 'date':
+    case 'dropdown':
+    case 'checkbox':
+      return type
+    case 'select':
+      return 'dropdown'
+    default:
+      return 'text'
+  }
+}
+
+const toOptionsArray = (value) => {
+  if (!value) return []
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') {
+    return value.split(',').map(v => v.trim()).filter(Boolean)
+  }
+  return []
+}
+
+const normalizeField = (field, idx) => {
+  const type = normalizeFieldType(field.type)
+  const options = (type === 'dropdown' || type === 'checkbox') ? toOptionsArray(field.options) : []
+  const optionsText = (type === 'dropdown' || type === 'checkbox')
+    ? (typeof field.optionsText === 'string' ? field.optionsText : options.join(', '))
+    : ''
+  const scoreRaw = Number(field.score ?? 0)
+  return {
+    id: field.id || makeFieldId(),
+    label: field.label || `Field ${idx + 1}`,
+    type,
+    required: Boolean(field.required),
+    options,
+    optionsText,
+    score: Number.isNaN(scoreRaw) ? 0 : scoreRaw,
+    requiresDocument: Boolean(field.requiresDocument ?? field.documentRequired),
+    documentLabel: field.documentLabel || field.documentUploadLabel || ''
+  }
+}
+
+const normalizeForm = (form) => {
+  if (!form) return form
+  const schemaSource = Array.isArray(form.schema) && form.schema.length
+    ? form.schema
+    : Array.isArray(form.fields) ? form.fields : []
+  const schema = schemaSource.map(normalizeField)
+  const name = form.name || form.title || 'Untitled Form'
+  return {
+    ...form,
+    name,
+    title: form.title || name,
+    schema
+  }
+}
+
+const prepareFieldForSave = (field) => {
+  const { optionsText, ...rest } = field
+  const type = normalizeFieldType(rest.type)
+  const options = (type === 'dropdown' || type === 'checkbox')
+    ? toOptionsArray(optionsText ?? rest.options)
+    : []
+  const scoreRaw = Number(rest.score ?? 0)
+  return {
+    ...rest,
+    id: rest.id || makeFieldId(),
+    type,
+    options,
+    required: Boolean(rest.required),
+    score: Number.isNaN(scoreRaw) ? 0 : scoreRaw,
+    requiresDocument: Boolean(rest.requiresDocument),
+    documentLabel: rest.documentLabel || ''
+  }
+}
 
 export default function Forms() {
   const { user } = useAuth()
+  const hallId = user?.hallId ?? null
+  const [forms, setForms] = useState(() => api.listForms().map(normalizeForm))
   const [showBuilder, setShowBuilder] = useState(false)
   const [editingForm, setEditingForm] = useState(null)
-  const forms = api.listForms()
-  const hallForms = forms.filter(f => f.hallId === user?.hallId)
+
+  const hallForms = useMemo(
+    () => forms.filter(f => f.hallId === hallId),
+    [forms, hallId]
+  )
+
+  const refreshForms = () => setForms(api.listForms().map(normalizeForm))
 
   const publishForm = (formId) => {
-    api.setActiveForm(formId, user?.hallId)
-    window.location.reload()
+    api.setActiveForm(formId, hallId)
+    refreshForms()
   }
 
   const unpublishForm = (formId) => {
-    const forms = api.listForms()
-    const form = forms.find(f => f.id === formId)
+    const form = api.getFormById(formId)
     if (form) {
-      form.active = false
-      api.saveForm(form)
-      window.location.reload()
+      api.saveForm({ ...form, active: false })
+      refreshForms()
     }
   }
 
@@ -32,6 +118,35 @@ export default function Forms() {
   const closeBuilder = () => {
     setShowBuilder(false)
     setEditingForm(null)
+  }
+
+  const handleSaveForm = (payload) => {
+    const schema = (payload.schema || []).map(prepareFieldForSave)
+    const base = {
+      ...payload,
+      schema,
+      hallId,
+      name: payload.name?.trim() || payload.title?.trim() || 'Untitled Form',
+      title: payload.name?.trim() || payload.title?.trim() || 'Untitled Form',
+      createdAt: payload.createdAt || Date.now(),
+      active: Boolean(payload.active)
+    }
+    delete base.fields
+
+    let saved
+    if (base.id) {
+      const current = api.getFormById(base.id)
+      saved = api.saveForm({ ...current, ...base })
+    } else {
+      saved = api.createForm(base)
+    }
+
+    if (base.active && saved) {
+      api.setActiveForm(saved.id, hallId)
+    }
+
+    refreshForms()
+    closeBuilder()
   }
 
   return (
@@ -62,7 +177,11 @@ export default function Forms() {
               ✕ Close
             </button>
           </div>
-          <FormBuilder hallId={user?.hallId} onComplete={closeBuilder} editingForm={editingForm} />
+          <FormBuilder
+            key={editingForm?.id || 'new-form'}
+            form={editingForm}
+            onSave={handleSaveForm}
+          />
         </div>
       )}
 
@@ -90,201 +209,10 @@ export default function Forms() {
   )
 }
 
-function FormBuilder({ hallId, onComplete, editingForm }) {
-  const [title, setTitle] = useState(editingForm?.title || editingForm?.name || '')
-  const [fields, setFields] = useState(
-    editingForm?.fields || editingForm?.schema || []
-  )
-
-  const addField = (index = null) => {
-    const newField = { 
-      label: '', 
-      type: 'text', 
-      required: false,
-      documentRequired: false,
-      score: 0
-    }
-    
-    if (index === null) {
-      // Add at the end
-      setFields([...fields, newField])
-    } else {
-      // Add after specific index
-      const updated = [...fields]
-      updated.splice(index + 1, 0, newField)
-      setFields(updated)
-    }
-  }
-
-  const removeField = (index) => {
-    setFields(fields.filter((_, i) => i !== index))
-  }
-
-  const updateField = (index, key, value) => {
-    const updated = [...fields]
-    updated[index][key] = value
-    setFields(updated)
-  }
-
-  const saveForm = () => {
-    if (!title.trim()) return alert('Form title is required')
-    if (fields.length === 0) return alert('At least one field is required')
-    if (fields.some(f => !f.label.trim())) return alert('All fields must have labels')
-
-    api.createForm({
-      hallId,
-      title,
-      fields,
-      name: title,
-      schema: fields,
-    })
-    alert(editingForm ? 'New form version created successfully!' : 'Form created successfully!')
-    onComplete()
-    window.location.reload()
-  }
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Form Title</label>
-        <input
-          value={title}
-          onChange={e => setTitle(e.target.value)}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          placeholder="e.g., Spring 2025 Admission Form"
-        />
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">Form Fields</label>
-          {fields.length === 0 && (
-            <button
-              onClick={() => addField()}
-              className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-            >
-              + Add First Field
-            </button>
-          )}
-        </div>
-
-        {fields.length === 0 ? (
-          <div className="bg-gray-50 rounded-lg p-8 text-center border-2 border-dashed border-gray-300">
-            <p className="text-gray-600">No fields added yet. Click "Add First Field" to start building your form.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {fields.map((field, idx) => (
-              <div key={idx} className="border-2 border-gray-200 rounded-lg p-4 bg-white">
-                <div className="space-y-3">
-                  {/* Field Label */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Field Label</label>
-                    <input
-                      value={field.label}
-                      onChange={e => updateField(idx, 'label', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded"
-                      placeholder="e.g., Full Name, Student ID, Department"
-                    />
-                  </div>
-
-                  {/* Field Type and Required */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Field Type</label>
-                      <select
-                        value={field.type}
-                        onChange={e => updateField(idx, 'type', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-                      >
-                        <option value="text">Text</option>
-                        <option value="email">Email</option>
-                        <option value="tel">Phone</option>
-                        <option value="number">Number</option>
-                        <option value="date">Date</option>
-                        <option value="textarea">Long Text</option>
-                        <option value="select">Dropdown</option>
-                        <option value="file">File Upload</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Score</label>
-                      <input
-                        type="number"
-                        value={field.score || 0}
-                        onChange={e => updateField(idx, 'score', parseInt(e.target.value) || 0)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded"
-                        placeholder="0"
-                        min="0"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Checkboxes */}
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={field.required}
-                        onChange={e => updateField(idx, 'required', e.target.checked)}
-                        className="w-4 h-4"
-                      />
-                      <span className="text-gray-700">Required</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={field.documentRequired}
-                        onChange={e => updateField(idx, 'documentRequired', e.target.checked)}
-                        className="w-4 h-4"
-                      />
-                      <span className="text-gray-700">Document Required</span>
-                    </label>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-2 pt-2 border-t border-gray-200">
-                    <button
-                      onClick={() => addField(idx)}
-                      className="flex-1 px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 font-medium"
-                    >
-                      + Add Field Below
-                    </button>
-                    <button
-                      onClick={() => removeField(idx)}
-                      className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 font-medium"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex gap-2 pt-4 border-t-2">
-        <button
-          onClick={saveForm}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-        >
-          {editingForm ? 'Save as New Version' : 'Create Form'}
-        </button>
-        <button
-          onClick={onComplete}
-          className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function FormCard({ form, onPublish, onUnpublish, onEdit }) {
   const applications = api.listApplications({ formId: form.id })
+  const schema = Array.isArray(form.schema) ? form.schema : []
+  const createdAt = form.createdAt ? new Date(form.createdAt).toLocaleDateString() : '—'
   
   return (
     <div className="bg-white border-2 border-gray-300 rounded-lg p-5">
@@ -303,7 +231,7 @@ function FormCard({ form, onPublish, onUnpublish, onEdit }) {
             )}
           </div>
           <div className="text-sm text-gray-600 mt-1">
-            Created: {new Date(form.createdAt).toLocaleDateString()}
+            Created: {createdAt}
           </div>
           <div className="text-sm text-gray-600">
             {applications.length} application(s) received
@@ -336,16 +264,21 @@ function FormCard({ form, onPublish, onUnpublish, onEdit }) {
 
       <div className="border-t pt-3 mt-3">
         <div className="text-sm font-medium text-gray-700 mb-2">
-          Form Fields ({(form.fields || form.schema || []).length}):
+          Form Fields ({schema.length}):
         </div>
         <div className="space-y-1">
-          {(form.fields || form.schema || []).map((field, idx) => (
-            <div key={idx} className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded border border-blue-200">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-blue-900">{field.label}</span>
-                <span className="text-xs text-blue-600">({field.type})</span>
-                {field.required && <span className="text-red-600 text-xs">*Required</span>}
-                {field.documentRequired && <span className="text-purple-600 text-xs">📎 Doc</span>}
+          {schema.map((field, idx) => (
+            <div key={field.id || idx} className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded border border-blue-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 text-sm text-blue-900">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{field.label}</span>
+                  <span className="text-xs text-blue-600">({field.type})</span>
+                  {field.required && <span className="text-red-600 text-xs">*Required</span>}
+                  {field.requiresDocument && <span className="text-purple-600 text-xs">📎 Doc</span>}
+                </div>
+                {(field.options || []).length > 0 && (
+                  <span className="text-xs text-blue-700">Options: {(field.options || []).join(', ')}</span>
+                )}
               </div>
               {field.score > 0 && (
                 <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">

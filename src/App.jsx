@@ -19,6 +19,7 @@ import ExamDashboard from './pages/exam/ExamDashboard.jsx'
 import Results from './pages/exam/Results.jsx'
 import SeatPlans from './pages/exam/SeatPlans.jsx'
 import StaffDashboard from './pages/staff/StaffDashboard.jsx'
+import DisciplinaryRecords from './pages/admin/DisciplinaryRecords.jsx'
 
 function Nav() {
   const { user, logout } = useAuth()
@@ -128,6 +129,11 @@ export default function App() {
           <Route path="/admin/forms" element={
             <ProtectedRoute roles={["admin"]}>
               <Forms />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/disciplinary" element={
+            <ProtectedRoute roles={["admin"]}>
+              <DisciplinaryRecords />
             </ProtectedRoute>
           } />
           <Route path="/admin/seat-plan" element={

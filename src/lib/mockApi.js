@@ -12,7 +12,10 @@ const KEYS = {
   renewals: 'uh_renewals',
   halls: 'uh_halls',
   results: 'uh_results',
-  seatPlanUploads: 'uh_seat_plan_uploads'
+  seatPlanUploads: 'uh_seat_plan_uploads',
+  interviews: 'uh_interviews',
+  seatAllocations: 'uh_seat_allocations',
+  disciplinaryRecords: 'uh_disciplinary_records'
 }
 
 function read(key, fallback) {
@@ -255,32 +258,55 @@ export function ensureSeedData() {
     const users = read(KEYS.users, [])
     const complaints = []
     
-    halls.forEach((hall, hallIdx) => {
+    halls.forEach((hall) => {
       const student = users.find(u => u.role === 'student' && u.hallId === hall.id)
-      
-      // Add 2 demo complaints per hall with different statuses
+      const hallAdmin = users.find(u => u.role === 'admin' && u.hallId === hall.id)
+      const day = 86400000
+      const primaryStudentId = student?.id || `student-${hall.shortName}-1`
+      const secondaryStudentId = student?.id || `student-${hall.shortName}-2`
+
+      const resolvedCreatedAt = Date.now() - (7 * day)
+      const resolvedWorkingAt = resolvedCreatedAt + (3 * day)
+      const resolvedAt = Date.now() - (2 * day)
+
       complaints.push({
         id: `complaint-${hall.id}-1`,
-        userId: student?.id || `student-${hall.shortName}-1`,
+        userId: primaryStudentId,
         hallId: hall.id,
-        subject: 'Water Supply Issue',
-        description: 'There is no water supply in the 3rd floor bathroom for the last 2 days.',
+        title: 'Water Supply Issue',
+        body: 'There is no water supply in the 3rd floor bathroom for the last 2 days.',
+        attachments: ['maintenance-ticket.pdf'],
         status: 'Resolved',
-        response: 'Water pump has been fixed. Supply restored on 2nd Oct.',
-        createdAt: Date.now() - (7 * 86400000), // 7 days ago
-        resolvedAt: Date.now() - (2 * 86400000) // 2 days ago
+        reviewNotes: 'Water pump has been fixed. Supply restored on 2nd Oct.',
+        createdAt: resolvedCreatedAt,
+        updatedAt: resolvedAt,
+        reviewedBy: hallAdmin?.id || null,
+        history: [
+          { status: 'Pending', timestamp: resolvedCreatedAt, actorId: primaryStudentId, notes: 'Complaint submitted by student.' },
+          { status: 'Working', timestamp: resolvedWorkingAt, actorId: hallAdmin?.id || null, notes: 'Maintenance team assigned to investigate.' },
+          { status: 'Resolved', timestamp: resolvedAt, actorId: hallAdmin?.id || null, notes: 'Water pump repaired and supply restored.' }
+        ]
       })
       
+      const workingCreatedAt = Date.now() - (1 * day)
+      const workingUpdatedAt = workingCreatedAt + (12 * 60 * 60 * 1000) // 12 hours later
+
       complaints.push({
         id: `complaint-${hall.id}-2`,
-        userId: student?.id || `student-${hall.shortName}-2`,
+        userId: secondaryStudentId,
         hallId: hall.id,
-        subject: 'Electricity Problem in Room 305',
-        description: 'Power socket not working. Need urgent repair for study purposes.',
-        status: 'In Progress',
-        response: 'Electrician has been notified. Will be fixed within 24 hours.',
-        createdAt: Date.now() - (1 * 86400000), // 1 day ago
-        resolvedAt: null
+        title: 'Electricity Problem in Room 305',
+        body: 'Power socket not working. Need urgent repair for study purposes.',
+        attachments: ['room-305-socket.jpg'],
+        status: 'Working',
+        reviewNotes: 'Electrician has been notified. Will be fixed within 24 hours.',
+        createdAt: workingCreatedAt,
+        updatedAt: workingUpdatedAt,
+        reviewedBy: hallAdmin?.id || null,
+        history: [
+          { status: 'Pending', timestamp: workingCreatedAt, actorId: secondaryStudentId, notes: 'Complaint submitted by student.' },
+          { status: 'Working', timestamp: workingUpdatedAt, actorId: hallAdmin?.id || null, notes: 'Electrician scheduled to visit the room.' }
+        ]
       })
     })
     
@@ -293,22 +319,47 @@ export function ensureSeedData() {
     const halls = read(KEYS.halls, [])
     const users = read(KEYS.users, [])
     const renewals = []
-    
-    halls.forEach((hall, hallIdx) => {
+    const day = 86400000
+    const sampleReasons = [
+      'Need additional semester to complete research project and thesis documentation.',
+      'Awaiting internship completion certificate that is required for graduation clearance.',
+      'Medical treatment schedule overlaps with current semester; require accommodation for recovery period.'
+    ]
+    const sampleDocs = [
+      ['project-extension-letter.pdf'],
+      ['internship-offer-letter.jpg', 'department-endorsement.pdf'],
+      ['medical-report.pdf']
+    ]
+
+    halls.forEach(hall => {
       const students = users.filter(u => u.role === 'student' && u.hallId === hall.id)
-      
-      students.slice(0, 2).forEach((student, idx) => {
+      if (students.length === 0) return
+
+      for (let idx = 0; idx < 3; idx += 1) {
+        const student = students[idx % students.length]
+        const status = idx === 0 ? 'Approved' : idx === 1 ? 'Pending' : 'Rejected'
+        const requestedAt = Date.now() - ((idx + 1) * 4 * day)
+        const reviewedAt = status === 'Pending' ? null : requestedAt + (2 * day)
         renewals.push({
           id: `renewal-${hall.id}-${idx}`,
           userId: student.id,
           hallId: hall.id,
-          status: idx === 0 ? 'Approved' : 'Pending',
-          requestedAt: Date.now() - ((idx + 1) * 5 * 86400000),
-          approvedAt: idx === 0 ? Date.now() - (2 * 86400000) : null
+          status,
+          reason: sampleReasons[idx],
+          proofDocuments: sampleDocs[idx],
+          requestedAt,
+          updatedAt: reviewedAt || requestedAt,
+          reviewedAt,
+          reviewedBy: status === 'Pending' ? null : (users.find(u => u.role === 'admin' && u.hallId === hall.id)?.id || null),
+          reviewNotes: status === 'Approved'
+            ? 'Reviewed and approved. Student has cleared dues and provided supporting documents.'
+            : status === 'Rejected'
+              ? 'Rejected due to insufficient documentation. Please resubmit with complete medical report.'
+              : ''
         })
-      })
+      }
     })
-    
+
     write(KEYS.renewals, renewals)
   }
   
@@ -504,20 +555,71 @@ export function listWaitlist(filter = {}) {
 }
 
 // Renewals
-export function requestRenewal(userId) {
+export function requestRenewal({ userId, reason, proofDocuments }) {
   const renewals = read(KEYS.renewals, [])
-  const r = { id: `r-${Date.now()}`, userId, status: 'Requested', createdAt: Date.now() }
-  renewals.push(r)
+  const users = read(KEYS.users, [])
+  const user = users.find(u => u.id === userId)
+  if (!user || user.role !== 'student') throw new Error('Only students can request renewals')
+
+  const now = Date.now()
+  const entry = {
+    id: `r-${now}`,
+    userId,
+    hallId: user.hallId || null,
+    status: 'Pending',
+    reason: reason?.trim() || 'No reason provided.',
+    proofDocuments: Array.isArray(proofDocuments) ? proofDocuments : [],
+    requestedAt: now,
+    updatedAt: now,
+    reviewedAt: null,
+    reviewedBy: null,
+    reviewNotes: ''
+  }
+  renewals.push(entry)
   write(KEYS.renewals, renewals)
-  return r
+  return entry
 }
-export function listRenewals() { return read(KEYS.renewals, []) }
-export function updateRenewal(id, status) {
+export function listRenewals(filter = {}) {
+  let renewals = read(KEYS.renewals, [])
+  let changed = false
+  const statusAliases = {
+    Requested: 'Pending'
+  }
+
+  renewals = renewals.map(item => {
+    const next = { ...item }
+    if (statusAliases[next.status]) { next.status = statusAliases[next.status]; changed = true }
+    if (!next.status) { next.status = 'Pending'; changed = true }
+    if (!next.reason) { next.reason = 'No reason provided.'; changed = true }
+    if (!Array.isArray(next.proofDocuments)) { next.proofDocuments = []; changed = true }
+    if (!next.requestedAt) { next.requestedAt = next.createdAt || Date.now(); changed = true }
+    if (!next.updatedAt) { next.updatedAt = next.reviewedAt || next.requestedAt; changed = true }
+    if (next.hallId === undefined) { next.hallId = null; changed = true }
+    if (next.reviewNotes === undefined) { next.reviewNotes = ''; changed = true }
+    return next
+  })
+
+  if (changed) {
+    write(KEYS.renewals, renewals)
+  }
+
+  if (filter.userId) renewals = renewals.filter(r => r.userId === filter.userId)
+  if (filter.hallId) renewals = renewals.filter(r => r.hallId === filter.hallId)
+
+  return renewals
+}
+export function updateRenewal(id, status, reviewerId, reviewNotes) {
   const renewals = read(KEYS.renewals, [])
-  const r = renewals.find(x => x.id === id)
-  if (r) r.status = status
+  const entry = renewals.find(x => x.id === id)
+  if (entry) {
+    entry.status = status
+    entry.reviewedBy = reviewerId || entry.reviewedBy || null
+    entry.reviewNotes = reviewNotes !== undefined ? reviewNotes : entry.reviewNotes
+    entry.reviewedAt = Date.now()
+    entry.updatedAt = entry.reviewedAt
+  }
   write(KEYS.renewals, renewals)
-  return r
+  return entry
 }
 
 // Notifications
@@ -541,6 +643,7 @@ export function createComplaint({ userId, title, body, attachments }) {
   if (!user || user.role !== 'student') throw new Error('Only students can file complaints')
   
   const list = read(KEYS.complaints, [])
+  const now = Date.now()
   const c = { 
     id: `c-${Date.now()}`, 
     userId, 
@@ -548,10 +651,14 @@ export function createComplaint({ userId, title, body, attachments }) {
     title, 
     body, 
     attachments: attachments || [], // Array of file names/URLs
-    status: 'Open', 
-    createdAt: Date.now(),
+    status: 'Pending', 
+    createdAt: now,
+    updatedAt: now,
     reviewedBy: null,
-    reviewNotes: ''
+    reviewNotes: '',
+    history: [
+      { status: 'Pending', timestamp: now, actorId: userId, notes: 'Complaint submitted by student.' }
+    ]
   }
   list.push(c)
   write(KEYS.complaints, list)
@@ -559,7 +666,65 @@ export function createComplaint({ userId, title, body, attachments }) {
 }
 
 export function listComplaints(filter = {}) {
+  const statusMap = {
+    Open: 'Pending',
+    'In Progress': 'Working',
+    Closed: 'Resolved'
+  }
+
   let list = read(KEYS.complaints, [])
+  let changed = false
+
+  list = list.map(item => {
+    const next = { ...item }
+
+    if (statusMap[next.status]) {
+      next.status = statusMap[next.status]
+      changed = true
+    }
+
+    if (!next.title && next.subject) {
+      next.title = next.subject
+      changed = true
+    }
+
+    if (!next.body && next.description) {
+      next.body = next.description
+      changed = true
+    }
+
+    if ((next.reviewNotes === undefined || next.reviewNotes === null) && next.response) {
+      next.reviewNotes = next.response
+      changed = true
+    }
+
+    if (!Array.isArray(next.attachments)) {
+      next.attachments = []
+      changed = true
+    }
+
+    if (!Array.isArray(next.history)) {
+      next.history = []
+      changed = true
+    }
+
+    if (!next.createdAt) {
+      next.createdAt = Date.now()
+      changed = true
+    }
+
+    if (!next.updatedAt) {
+      next.updatedAt = next.resolvedAt || next.createdAt
+      changed = true
+    }
+
+    return next
+  })
+
+  if (changed) {
+    write(KEYS.complaints, list)
+  }
+
   if (filter.userId) list = list.filter(c => c.userId === filter.userId)
   if (filter.hallId) list = list.filter(c => c.hallId === filter.hallId)
   return list
@@ -569,10 +734,14 @@ export function updateComplaintStatus(id, status, reviewedBy, reviewNotes) {
   const list = read(KEYS.complaints, [])
   const c = list.find(x => x.id === id)
   if (c) {
+    const now = Date.now()
     c.status = status
-    if (reviewedBy) c.reviewedBy = reviewedBy
-    if (reviewNotes) c.reviewNotes = reviewNotes
-    c.updatedAt = Date.now()
+    if (reviewedBy !== undefined) c.reviewedBy = reviewedBy
+    if (reviewNotes !== undefined) c.reviewNotes = reviewNotes
+    c.updatedAt = now
+
+    if (!Array.isArray(c.history)) c.history = []
+    c.history.push({ status, timestamp: now, actorId: reviewedBy || null, notes: reviewNotes || '' })
   }
   write(KEYS.complaints, list)
   return c
@@ -636,5 +805,351 @@ const HALL_PREFIX_MAP = {
 export function deriveHallFromStudentId(studentId) {
   if (!studentId) return null
   const prefix = String(studentId).trim().slice(0,3).toUpperCase()
+  return HALL_PREFIX_MAP[prefix] || null
+}
+
+// ============================================
+// INTERVIEW MANAGEMENT
+// ============================================
+
+// Calculate total score for an application
+export function calculateApplicationScore(application) {
+  const form = getFormById(application.formId)
+  if (!form || !form.fields) return 0
+  
+  let totalScore = 0
+  form.fields.forEach(field => {
+    if (field.score && application.data[field.id]) {
+      totalScore += field.score
+    }
+  })
+  return totalScore
+}
+
+// Select applications for interview
+export function selectForInterview({ applicationIds, interviewDate, interviewTime, venue, hallId }) {
+  const interviews = read(KEYS.interviews, [])
+  const notifications = read(KEYS.notifications, [])
+  const applications = read(KEYS.applications, [])
+  
+  applicationIds.forEach(appId => {
+    const app = applications.find(a => a.id === appId)
+    if (!app) return
+    
+    // Create interview entry
+    const interview = {
+      id: `interview-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      applicationId: appId,
+      userId: app.userId,
+      hallId: hallId,
+      interviewDate,
+      interviewTime,
+      venue,
+      status: 'Scheduled', // Scheduled, Completed, Cancelled
+      result: null, // Selected, NotSelected
+      remarks: '',
+      createdAt: new Date().toISOString()
+    }
+    interviews.push(interview)
+    
+    // Update application status
+    const appIndex = applications.findIndex(a => a.id === appId)
+    if (appIndex !== -1) {
+      applications[appIndex].status = 'Interview Scheduled'
+      applications[appIndex].interviewScheduled = true
+    }
+    
+    // Create notification for student
+    const notification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: app.userId,
+      hallId: hallId,
+      type: 'interview',
+      title: 'Interview Scheduled',
+      message: `Your interview has been scheduled for ${interviewDate} at ${interviewTime}. Venue: ${venue}`,
+      read: false,
+      createdAt: new Date().toISOString()
+    }
+    notifications.push(notification)
+  })
+  
+  write(KEYS.interviews, interviews)
+  write(KEYS.applications, applications)
+  write(KEYS.notifications, notifications)
+  
+  return interviews
+}
+
+// Get interviews
+export function listInterviews({ hallId, userId, status }) {
+  let interviews = read(KEYS.interviews, [])
+  
+  if (hallId) interviews = interviews.filter(i => i.hallId === hallId)
+  if (userId) interviews = interviews.filter(i => i.userId === userId)
+  if (status) interviews = interviews.filter(i => i.status === status)
+  
+  return interviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+}
+
+// Update interview
+export function updateInterview(interviewId, updates) {
+  const interviews = read(KEYS.interviews, [])
+  const index = interviews.findIndex(i => i.id === interviewId)
+  
+  if (index !== -1) {
+    interviews[index] = { ...interviews[index], ...updates }
+    write(KEYS.interviews, interviews)
+    
+    // If interview result is updated, update application status
+    if (updates.result) {
+      const applications = read(KEYS.applications, [])
+      const appIndex = applications.findIndex(a => a.id === interviews[index].applicationId)
+      if (appIndex !== -1) {
+        if (updates.result === 'Selected') {
+          applications[appIndex].status = 'Interview Passed'
+        } else if (updates.result === 'NotSelected') {
+          applications[appIndex].status = 'Interview Failed'
+        }
+        write(KEYS.applications, applications)
+      }
+    }
+    
+    return interviews[index]
+  }
+  
+  throw new Error('Interview not found')
+}
+
+// ============================================
+// SEAT ALLOCATION
+// ============================================
+
+// Allocate seat to student
+export function allocateSeat({ userId, hallId, roomNumber, seatNumber, session, department }) {
+  const allocations = read(KEYS.seatAllocations, [])
+  const users = read(KEYS.users, [])
+  const notifications = read(KEYS.notifications, [])
+  const applications = read(KEYS.applications, [])
+  
+  // Check if seat already allocated
+  const existing = allocations.find(a => 
+    a.hallId === hallId && 
+    a.roomNumber === roomNumber && 
+    a.seatNumber === seatNumber &&
+    a.status === 'Occupied'
+  )
+  
+  if (existing) {
+    throw new Error('Seat already occupied')
+  }
+  
+  // Check if user already has a seat
+  const userSeat = allocations.find(a => a.userId === userId && a.status === 'Occupied')
+  if (userSeat) {
+    throw new Error('User already has a seat allocated')
+  }
+  
+  const allocation = {
+    id: `seat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    hallId,
+    roomNumber,
+    seatNumber,
+    session,
+    department,
+    status: 'Occupied', // Occupied, Vacant
+    allocatedAt: new Date().toISOString(),
+    vacatedAt: null
+  }
+  
+  allocations.push(allocation)
+  write(KEYS.seatAllocations, allocations)
+  
+  // Update user role if student
+  const userIndex = users.findIndex(u => u.id === userId)
+  if (userIndex !== -1 && users[userIndex].role === 'student') {
+    users[userIndex].seatAllocated = true
+    users[userIndex].roomNumber = roomNumber
+    users[userIndex].seatNumber = seatNumber
+    write(KEYS.users, users)
+  }
+  
+  // Update application status
+  const appIndex = applications.findIndex(a => a.userId === userId && a.hallId === hallId)
+  if (appIndex !== -1) {
+    applications[appIndex].status = 'Admitted'
+    applications[appIndex].seatAllocated = true
+    write(KEYS.applications, applications)
+  }
+  
+  // Create notification
+  const notification = {
+    id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    hallId,
+    type: 'seat_allocation',
+    title: 'Seat Allocated',
+    message: `You have been allocated Room ${roomNumber}, Seat ${seatNumber}`,
+    read: false,
+    createdAt: new Date().toISOString()
+  }
+  notifications.push(notification)
+  write(KEYS.notifications, notifications)
+  
+  return allocation
+}
+
+// List seat allocations
+export function listSeatAllocations({ hallId, session, department, status, userId }) {
+  let allocations = read(KEYS.seatAllocations, [])
+  
+  if (hallId) allocations = allocations.filter(a => a.hallId === hallId)
+  if (session) allocations = allocations.filter(a => a.session === session)
+  if (department) allocations = allocations.filter(a => a.department === department)
+  if (status) allocations = allocations.filter(a => a.status === status)
+  if (userId) allocations = allocations.filter(a => a.userId === userId)
+  
+  return allocations.sort((a, b) => {
+    // Sort by room number, then seat number
+    if (a.roomNumber !== b.roomNumber) {
+      return parseInt(a.roomNumber) - parseInt(b.roomNumber)
+    }
+    return parseInt(a.seatNumber) - parseInt(b.seatNumber)
+  })
+}
+
+// Vacate seat
+export function vacateSeat(allocationId) {
+  const allocations = read(KEYS.seatAllocations, [])
+  const users = read(KEYS.users, [])
+  const notifications = read(KEYS.notifications, [])
+  
+  const index = allocations.findIndex(a => a.id === allocationId)
+  if (index === -1) {
+    throw new Error('Seat allocation not found')
+  }
+  
+  const allocation = allocations[index]
+  
+  // Update allocation status
+  allocations[index] = {
+    ...allocation,
+    status: 'Vacant',
+    vacatedAt: new Date().toISOString()
+  }
+  write(KEYS.seatAllocations, allocations)
+  
+  // Update user
+  const userIndex = users.findIndex(u => u.id === allocation.userId)
+  if (userIndex !== -1) {
+    users[userIndex].seatAllocated = false
+    users[userIndex].roomNumber = null
+    users[userIndex].seatNumber = null
+    write(KEYS.users, users)
+  }
+  
+  // Create notification
+  const notification = {
+    id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    userId: allocation.userId,
+    hallId: allocation.hallId,
+    type: 'seat_vacated',
+    title: 'Seat Vacated',
+    message: `Your seat (Room ${allocation.roomNumber}, Seat ${allocation.seatNumber}) has been vacated`,
+    read: false,
+    createdAt: new Date().toISOString()
+  }
+  notifications.push(notification)
+  write(KEYS.notifications, notifications)
+  
+  return allocations[index]
+}
+
+// ============================================
+// DISCIPLINARY RECORDS
+// ============================================
+
+// Add disciplinary record
+export function addDisciplinaryRecord({ userId, hallId, offenseType, description, actionTaken, severity, recordedBy }) {
+  const records = read(KEYS.disciplinaryRecords, [])
+  const notifications = read(KEYS.notifications, [])
+  
+  const record = {
+    id: `disc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    hallId,
+    offenseType,
+    description,
+    actionTaken,
+    severity, // Minor, Major, Severe
+    recordedBy,
+    recordedAt: new Date().toISOString()
+  }
+  
+  records.push(record)
+  write(KEYS.disciplinaryRecords, records)
+  
+  // Create notification
+  const notification = {
+    id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    hallId,
+    type: 'disciplinary',
+    title: 'Disciplinary Record Added',
+    message: `A disciplinary record has been added to your profile. Offense: ${offenseType}`,
+    read: false,
+    createdAt: new Date().toISOString()
+  }
+  notifications.push(notification)
+  write(KEYS.notifications, notifications)
+  
+  return record
+}
+
+// List disciplinary records
+export function listDisciplinaryRecords({ hallId, userId, severity }) {
+  let records = read(KEYS.disciplinaryRecords, [])
+  
+  if (hallId) records = records.filter(r => r.hallId === hallId)
+  if (userId) records = records.filter(r => r.userId === userId)
+  if (severity) records = records.filter(r => r.severity === severity)
+  
+  return records.sort((a, b) => new Date(b.recordedAt) - new Date(a.recordedAt))
+}
+
+// Update disciplinary record
+export function updateDisciplinaryRecord(recordId, updates) {
+  const records = read(KEYS.disciplinaryRecords, [])
+  const index = records.findIndex(r => r.id === recordId)
+  
+  if (index !== -1) {
+    records[index] = { ...records[index], ...updates }
+    write(KEYS.disciplinaryRecords, records)
+    return records[index]
+  }
+  
+  throw new Error('Record not found')
+}
+
+// Delete disciplinary record
+export function deleteDisciplinaryRecord(recordId) {
+  const records = read(KEYS.disciplinaryRecords, [])
+  const filtered = records.filter(r => r.id !== recordId)
+  write(KEYS.disciplinaryRecords, filtered)
+  return true
+}
+
+// ============================================
+// PUBLISH INTERVIEW LIST
+// ============================================
+
+export function publishInterviewList({ hallId, selectedApplicationIds, interviewDate, interviewTime, venue }) {
+  return selectForInterview({
+    applicationIds: selectedApplicationIds,
+    interviewDate,
+    interviewTime,
+    venue,
+    hallId
+  })
   return HALL_PREFIX_MAP[prefix] || null
 }

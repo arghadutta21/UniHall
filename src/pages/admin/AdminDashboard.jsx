@@ -51,13 +51,6 @@ export default function AdminDashboard() {
             borderColor="border-gray-300"
           />
           <ManagementCard 
-            title="Manage Notifications"
-            description="Create and publish hall notifications"
-            to="/notifications" 
-            bgColor="bg-white"
-            borderColor="border-gray-300"
-          />
-          <ManagementCard 
             title="View Applications"
             description="Review submitted applications by form"
             to="/admin/applications"
@@ -65,11 +58,25 @@ export default function AdminDashboard() {
             borderColor="border-gray-300"
           />
           <ManagementCard 
-            title="Seat Management"
-            description="Allocate and manage room assignments"
-            to="/admin/seat-plan"
+            title="Seat Allocation" 
+            description="Allocate seats to admitted students"
+            to="/admin/seat-allocation"
             bgColor="bg-white"
-            borderColor="border-gray-300" 
+            borderColor="border-green-300"
+          />
+          <ManagementCard 
+            title="Disciplinary Records" 
+            description="Manage student disciplinary records"
+            to="/admin/disciplinary"
+            bgColor="bg-white"
+            borderColor="border-red-300"
+          />
+          <ManagementCard 
+            title="Manage Notifications"
+            description="Create and publish hall notifications"
+            to="/notifications" 
+            bgColor="bg-white"
+            borderColor="border-gray-300"
           />
           <ManagementCard 
             title="Complaints"
